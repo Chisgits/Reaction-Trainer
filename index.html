@@ -243,7 +243,7 @@
   <div id="cc-idle-screen" class="screen idle-screen">
     <button class="back-link" data-home>&#8592; Home</button>
     <h1 class="idle-title">Color caller</h1>
-    <p class="idle-subtitle">4 minute session. Calls a random color every few seconds, speeding up after every 4 calls.</p>
+    <p class="idle-subtitle">4 minute session. Starts at 3s per color, speeding up every 10 calls down to a 1s minimum.</p>
     <button class="start-btn" id="cc-start-btn">Start</button>
     <div class="settings-row">
       <label for="cc-voice-toggle">Voice</label>
@@ -371,15 +371,46 @@
     showScreen('tnIdle');
   });
 
+  // ===================== Wake lock manager =====================
+  // Keeps the screen on while a session is running.
+  // Uses the Screen Wake Lock API (supported in Chrome on Android).
+  var wakeLock = null;
+  var running = false; // shared running flag used by visibilitychange re-acquire
+
+  function acquireWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    navigator.wakeLock.request('screen').then(function (lock) {
+      wakeLock = lock;
+      lock.addEventListener('release', function () { wakeLock = null; });
+    }).catch(function () {
+      // Wake lock not granted — session continues normally, screen may sleep
+    });
+  }
+
+  function releaseWakeLock() {
+    if (wakeLock) {
+      wakeLock.release().catch(function () {});
+      wakeLock = null;
+    }
+  }
+
+  // Re-acquire if the user switches away and back mid-session
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && running) {
+      acquireWakeLock();
+    }
+  });
+
   // ===================== Color caller module =====================
   var ColorCaller = (function () {
+    var START_INTERVAL = 3; // Color Caller starts at 3s (overrides shared value)
     var COLORS = {
       orange: '#D85A30',
       yellow: '#EF9F27',
       red:    '#A32D2D',
       green:  '#3B6D11'
     };
-    var COLORS_PER_CYCLE = 4;
+    var COLORS_PER_CYCLE = 10;
 
     var runScreen = document.getElementById('cc-run-screen');
     var startBtn = document.getElementById('cc-start-btn');
@@ -447,6 +478,7 @@
       count = 0;
       lastColor = null;
       sessionStart = Date.now();
+      acquireWakeLock();
       showScreen('ccRun');
       timerPill.textContent = formatTime(TOTAL_MS);
       step();
@@ -458,6 +490,7 @@
       if (stepTimer) clearTimeout(stepTimer);
       if (tickTimer) clearInterval(tickTimer);
       stopAllSpeech();
+      releaseWakeLock();
       runScreen.style.background = '#000';
       showScreen('ccEnd');
     }
@@ -467,6 +500,7 @@
       if (stepTimer) clearTimeout(stepTimer);
       if (tickTimer) clearInterval(tickTimer);
       stopAllSpeech();
+      releaseWakeLock();
       runScreen.style.background = '#000';
     }
 
@@ -569,6 +603,7 @@
       lastDirection = null;
       streakCount = 0;
       sessionStart = Date.now();
+      acquireWakeLock();
       arrow.style.transform = 'rotate(0deg)';
       showScreen('tnRun');
       timerPill.textContent = formatTime(TOTAL_MS);
@@ -581,6 +616,7 @@
       if (stepTimer) clearTimeout(stepTimer);
       if (tickTimer) clearInterval(tickTimer);
       stopAllSpeech();
+      releaseWakeLock();
       showScreen('tnEnd');
     }
 
@@ -589,6 +625,7 @@
       if (stepTimer) clearTimeout(stepTimer);
       if (tickTimer) clearInterval(tickTimer);
       stopAllSpeech();
+      releaseWakeLock();
     }
 
     startBtn.addEventListener('click', start);
